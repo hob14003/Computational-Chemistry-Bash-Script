@@ -1,0 +1,1262 @@
+#!/bin/bash
+
+#
+#
+#VARIABLES
+#
+#
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+bond[0]="$1" #command line atoms used for freezing, must remain outside
+bond[1]="$2" #function to get the proper data into the array
+bond[2]="$3"
+bond[3]="$4"
+bond[4]="$5"
+bond[5]="$6"
+bond[6]="$7"
+bond[7]="$8"
+bond[8]="$9"
+
+MA=0 #counts for metal atoms in compound
+NMA=0 #counts for nonmetal atoms in compound
+MATOMS[0]=0 #array of metal atoms in compound
+NMATOMS[0]=0 #array of nonmetal atoms in compound
+
+oAtoms[0]='C' #nonmetal atoms (incomplete)
+oAtoms[1]='H'
+oAtoms[2]='O'
+oAtoms[3]='F'
+oAtoms[4]='Cl'
+oAtoms[5]='S'
+oAtoms[6]='Se'
+oAtoms[7]='N'
+oAtoms[8]='P'
+oAtoms[9]='Br'
+oAtoms[10]='I'
+
+iAtoms[0]='Mn' #metal atoms (incomplete)
+iAtoms[1]='Cr'
+iAtoms[2]='Fe'
+iAtoms[3]='Co'
+iAtoms[4]='Ni'
+iAtoms[5]='Cu'
+iAtoms[6]='Zn'
+iAtoms[7]='Ti'
+iAtoms[8]='Sc'
+iAtoms[9]='Y'
+iAtoms[10]='Zr'
+iAtoms[11]='Nb'
+iAtoms[12]='Mo'
+iAtoms[13]='Tc'
+iAtoms[14]='Ru'
+iAtoms[15]='Rh'
+iAtoms[16]='Pd'
+iAtoms[17]='Ag'
+iAtoms[18]='Cd'
+iAtoms[19]='La'
+iAtoms[20]='Hf'
+iAtoms[21]='Ta'
+iAtoms[22]='W'
+iAtoms[23]='Re'
+iAtoms[24]='Os'
+iAtoms[25]='Ir'
+iAtoms[26]='Pt'
+iAtoms[27]='Au'
+iAtoms[28]='Hg'
+iAtoms[29]='Ac'
+iAtoms[30]='Rf'
+iAtoms[31]='Db'
+iAtoms[32]='Sg'
+iAtoms[33]='Bh'
+iAtoms[34]='Hs'
+iAtoms[35]='Cn'
+iAtoms[36]='In'
+iAtoms[37]='Sn'
+iAtoms[38]='Tl'
+iAtoms[39]='Pb'
+
+#
+#
+# FUNCTIONS
+#
+#
+
+##########################################################################
+menu () { #determines what calculations are done
+menuOption='X'
+echo
+echo "1) spinScript"
+echo "2) GJF"
+echo "3) LOG"
+echo "4) IRC"
+echo "5) stdCoordinates"
+echo "L) ls"
+echo "T) therm"
+echo "S) slurmScript"
+echo "Q) QUIT"
+echo "Please type the number of your selected option"
+read menuOption
+}
+
+##########################################################################
+determineProcedure () { #determines what calculations are done
+case $1 in
+	Op*)
+	PROCEDURE='opt freq=Noraman'
+        ;;
+	Mr*)
+	PROCEDURE='opt=modred'
+	;;
+	Ts*)
+	PROCEDURE='opt=(ts,noeigen,calcFC) freq=Noraman'
+	;;
+	#Fc*)
+	#PROCEDURE='opt=calcFC'
+	#;;
+	#Fr*)
+	#PROCEDURE='freq=Noraman'
+	#;;
+	Ir*)
+	PROCEDURE='IRC=(calcFC,forward,lqa,maxpoints=50)'
+	;;
+	De*)
+	PROCEDURE=''
+	;;
+esac
+}
+
+##########################################################################
+stationaryPoint () {
+
+if [[ $handleStationary == "y" ]]
+then
+echo "Do you want to process $1.log?(y/n)"
+read hs
+	if [[ $hs == 'y' ]]
+	then
+	TRUEFALSE="T"
+	else
+    	TRUEFALSE="F"
+     	fi
+else
+TRUEFALSE="F"
+fi
+}
+
+##########################################################################
+nextProcedure () { #determines what calculations are done
+
+
+case $1 in
+	Op*)
+	QCOMP=$(echo $2 | cut -f 1 -d 'O') #compensate for Q cap
+        if grep -q "Stationary point" $2.log && [ ! -f "$2"De.com ] && [ ! -f "$2"ROp.com ] \
+	&& [ ! -f "$QCOMP"ROp.com ] && [ ! -f "$2"ROpQ.com ] && [ ! -f "$QCOMP"ROpQ.com ]
+        then
+        TRUEFALSE="T"
+        PROCEDURE='' #done with opt now Fr
+        SUFFIX='De'
+        elif grep -q "Error termination" $2.log && [ ! -f "$2"De.com ] && [ ! -f "$2"ROp.com ] \
+	&& [ ! -f "$QCOMP"ROp.com ] && [ ! -f "$2"ROpQ.com ] && [ ! -f "$QCOMP"ROpQ.com ]
+        then
+        TRUEFALSE="T"
+        PROCEDURE=' opt freq=Noraman'
+        SUFFIX='ROp'
+        else
+	stationaryPoint $2
+	PROCEDURE=' opt freq=Noraman'
+	SUFFIX='ROp'
+	fi
+        ;;
+        Mr*)
+	QCOMP=$(echo $2 | cut -f 1 -d 'M') #compensate for Q cap
+        if grep -q "Stationary point" $2.log && [ ! -f "$2"Ts.com ] && [ ! -f "$2"RMr.com ] \
+	&& [ ! -f "$QCOMP"ROp.com ] && [ ! -f "$2"ROpQ.com ] && [ ! -f "$QCOMP"ROpQ.com ]
+        then
+        TRUEFALSE="T"
+        PROCEDURE=' opt=(ts,noeigen,calcFC)' #done with Mr now Ts
+        SUFFIX='Ts'
+        elif grep -q "Error termination" $2.log && [ ! -f "$2"Ts.com ] && [ ! -f "$2"RMr.com ]
+        then
+        TRUEFALSE="T"
+        PROCEDURE=' opt=modred'
+        SUFFIX="RMr"
+        else
+        stationaryPoint $2
+        PROCEDURE=' opt=modred'
+        SUFFIX="RMr"
+        fi
+        ;;
+        Ts*)
+	QCOMP=$(echo $2 | cut -f 1 -d 'T') #compensate for Q cap
+        if grep -q "Stationary point" $2.log && [ ! -f "$2"De.com ] && [ ! -f "$2"RTs.com ] \
+	&& [ ! -f "$QCOMP"ROp.com ] && [ ! -f "$2"ROpQ.com ] && [ ! -f "$QCOMP"ROpQ.com ]
+        then
+        TRUEFALSE="T"
+        PROCEDURE='' #done with Ts & Fr now De
+        SUFFIX='De'
+        elif grep -q "Error termination" $2.log && [ ! -f "$2"De.com ] && [ ! -f "$2"RTs.com ] \
+	&& [ ! -f "$QCOMP"ROp.com ] && [ ! -f "$2"ROpQ.com ] && [ ! -f "$QCOMP"ROpQ.com ]
+        then
+        TRUEFALSE="T"
+        PROCEDURE=' opt=(ts,noeigen,calcFC) freq=Noraman'
+        SUFFIX="RTs"
+        else
+        stationaryPoint $2
+        PROCEDURE=' opt=(ts,noeigen,calcFC) freq=Noraman'
+        SUFFIX="RTs"
+        fi
+        ;;
+        #Fr*) #it shouldn't find a stationary point with Fr, use Normal ter?
+	#QCOMP=$(echo $2 | cut -f 1 -d 'F') #compensate for Q cap
+        #if grep -q "Error termination" $2.log && [ ! -f "$2"De.com ] && [ ! -f "$2"RFr.com ] \
+	#&& [ ! -f "$QCOMP"ROp.com ] && [ ! -f "$2"ROpQ.com ] && [ ! -f "$QCOMP"ROpQ.com ]
+        #then
+        #TRUEFALSE="T"
+        #PROCEDURE=' freq=Noraman'
+        #SUFFIX="RFr"
+        #elif grep -q "Normal termination" $2.log && [ ! -f "$2"De.com ] && [ ! -f "$2"RFr.com ] \
+	#&& [ ! -f "$QCOMP"ROp.com ] && [ ! -f "$2"ROpQ.com ] && [ ! -f "$QCOMP"ROpQ.com ]
+	#then
+	#TRUEFALSE="T"
+	#PROCEDURE=''
+	#SUFFIX='De'
+	#~/Scripts/exTherm $2.log #sending it the frequency log file.
+	#else
+        #stationaryPoint $2
+        #PROCEDURE=' freq=Noraman'
+        #SUFFIX="RFr"
+        #fi
+        #;;
+        De*)
+	QCOMP=$(echo $2 | cut -f 1 -d 'D') #compensate for Q cap
+        if grep -q "Error termination" $2.log && [ ! -f "$2"Ir.com ] && [ ! -f "$2"RDe.com ] \
+	&& [ ! -f "$QCOMP"ROp.com ] && [ ! -f "$2"ROpQ.com ] && [ ! -f "$QCOMP"ROpQ.com ]
+        then
+        TRUEFALSE="T"
+        PROCEDURE=''
+        SUFFIX="RDe"
+        elif grep -q "Normal termination" $2.log && [ ! -f "$2"Ir.com ] && [ ! -f "$2"RDe.com ] \
+	&& [ ! -f "$QCOMP"ROp.com ] && [ ! -f "$2"ROpQ.com ] && [ ! -f "$QCOMP"ROpQ.com ]
+        then
+	echo Start of De
+	read pause
+		JOBNAMEFr=$(echo $2 | cut -f 1 -d 'D')
+
+		let "BF1 = $(echo ${#JOBNAMEFr})-1"
+		BASEF1="${JOBNAME:$BF1:1}"
+			if [[ $BASEF1 == 'R' ]] #&& [[ $BASEF2 == 'r' ]]
+			then
+			echo "De has been repeated, insert proper frequency file for $JOBNAMEFr"
+			echo "It should end in Fr"
+			read JOBNAMEFr
+			fi
+		CutF=$(echo ${SCRIPTS[i]} | cut -f 1 -d '_') #first name of file (ex 1st_2nd_3rd.log)
+		echo "This is JOBNAMEFr $JOBNAMEFr" #remove once verified
+
+			cp $JOBNAME.com $JOBNAME"Q".com
+			cp $JOBNAME.log $JOBNAME"Q".log
+			cp $JOBNAME.chk $JOBNAME"Q".chk
+			cp $JOBNAME.sh $JOBNAME"Q".sh
+			#echo confirm that $JOBNAME files exist with Q cap
+			#read pause
+			~/Scripts/xpTherm $JOBNAMEFr'Q.log' #sending it the frequency log file.
+			~/Scripts/xpTherm $2'Q.log' #sending it the single point log file.
+
+        	echo "confirm csv report for $JOBNAMEFr.log and $2.log"
+		read pause
+		echo "csv report logged for $2.log"
+		removFiles $JOBNAME
+
+	TRUEFALSE="F"
+        else
+        TRUEFALSE="F"
+        fi
+        ;;
+        Ir*)
+        TRUEFALSE="F" #I know of nothing beyond IRC
+        ;;
+
+esac
+}
+
+##########################################################################
+metalCase () {
+
+	case $1 in 		#dos2unix is needed to convert format so no ^M
+        	Cr*)
+		R2PLACE_ME='m06l'
+		R3PLACE_ME='pseudo=read'
+		m=100
+		SOLVENT="scrf=(smd,solvent=benzene) "
+		RESTRICTED=' u'
+		dELECTRONS=4
+		R4PLACE_ME='6-31G(d,p)'
+		R5PLACE_ME='lanl2dz'
+		EPS=0
+		RSOLV=0
+		;;
+		In*)
+		R2PLACE_ME='m06'
+		R3PLACE_ME='pseudo=read'
+		m=100
+		SOLVENT="scrf=(smd,read) "
+		RESTRICTED=' nosymm '
+		EPS=8.42
+		RSOLV=2.479
+		dELECTRONS=1
+		SpiN=1
+		R4PLACE_ME='6-31+g(d,p)'
+		R5PLACE_ME='LanL2DZ'
+		;;
+		Sn*)
+		R2PLACE_ME='m06'
+		R3PLACE_ME='pseudo=read'
+		m=100
+		SOLVENT="scrf=(smd,read) "
+		RESTRICTED=' nosymm '
+		EPS=8.42
+		RSOLV=2.479
+		dELECTRONS=1
+		SpiN=1
+		R4PLACE_ME='6-31+g(d,p)'
+		R5PLACE_ME='LanL2DZ'
+		;;
+		Tl*)
+		R2PLACE_ME='m06'
+		R3PLACE_ME='pseudo=read'
+		m=100
+		SOLVENT="scrf=(smd,read) "
+		RESTRICTED=' nosymm '
+		EPS=8.42
+		RSOLV=2.479
+		dELECTRONS=1
+		SpiN=1
+		R4PLACE_ME='6-31+g(d,p)'
+		R5PLACE_ME='LanL2DZ'
+		;;
+		Pb*)
+		R2PLACE_ME='m06'
+		R3PLACE_ME='pseudo=read'
+		m=100
+		SOLVENT="scrf=(smd,read) "
+		RESTRICTED=' nosymm '
+		EPS=8.42
+		RSOLV=2.479
+		dELECTRONS=1
+		SpiN=1
+		R4PLACE_ME='6-31+g(d,p)'
+		R5PLACE_ME='LanL2DZ'
+		;;
+	esac
+}
+
+##########################################################################
+def2TZVPPD () { #$1=JOBNAME This should be made into its own script to be called
+
+~/Scripts/def2tzvppdScript $1 >> $1.com #needs name of file without extension
+}				       #and a destination to work
+
+##########################################################################
+metalAtoms () {
+
+dELECTRONS='X'
+SpiN='X'
+
+if grep -q "$1 " $2.struct
+then
+metalCase $1 $2
+fi
+
+}
+
+##########################################################################
+makeHeader () { #$1=$JOBNAME(current) $2=$BASE1 $3=$JOBNAME(previous)
+echo "%nprocshared=12" > $1.com
+echo "%mem=12gb" >> $1.com
+echo "%chk=$1" >> $1.com
+m=0
+nometal=0
+
+while [ $m -lt 40 ] #deterine types of atoms in structure
+do
+metalAtoms ${iAtoms[$m]} $1 #inserts proper effects on .com file
+(( m++ ))
+done
+if [ $m -lt 100 ]
+then
+nometal=1
+echo "What metal is involved with this organic compound? (i.e. 'Cr')"
+read chooseMetal
+metalCase $chooseMetal $1
+R3PLACE_ME=''
+R5PLACE_ME=''
+fi
+m=0
+
+#list of relevant file name modifications:
+#_sp##_ adds proper charge and spin, def2tzvppd allows inserts def2tzvppd basis set
+echo -n "#$PROCEDURE$RESTRICTED$R2PLACE_ME/gen " >> $1.com
+
+echo -n "$R3PLACE_ME " >> $1.com
+
+if grep -q "_sp01_" $1.com
+then
+echo -n "guess=(mix,always) " >> $1.com
+fi
+
+echo -n "$SOLVENT" >> $1.com
+
+if grep -q "toluene" $1.com
+then
+	sed -i "$1.com" -e "s/benzene/toluene/" #these will change,
+fi
+
+
+if grep -q "aceticacid" $1.com
+then
+	sed -i "$1.com" -e "s/(smd,read)/(smd,solvent=AceticAcid)/" #these will change,
+	EPS=0
+fi
+
+if grep -q "_temp" $1.com #come back to this later to improve
+then
+
+t5=$(echo ${SQRIPTS[i]} | cut -f 5 -d '_') #5th name of file
+t6=$(echo ${SQRIPTS[i]} | cut -f 6 -d '_') #6th name of file
+bt5="${t5:0:4}" #may contain temp
+bt6="${t6:0:4}" #may contain temp
+	if [[ $bt5 == temp ]]
+	then
+	bt5t="${t5:4:3}" #contains temp in K
+	bt5v="${t5:7:1}" #contains v or nothing
+	bt5d="${t5:8:1}" #contains decimal or nothing
+		if [[ $bt5v == v ]]
+		then
+		echo -n "Temperature=$bt5t.$bt5d " >> $1.com
+		else
+		echo -n "Temperature=$bt5t " >> $1.com
+		fi
+	elif [[ $bt6 == temp ]]
+	then
+	bt6t="${t5:4:3}" #contains temp in K
+	bt6v="${t5:7:1}" #contains v or nothing
+	bt6d="${t5:8:1}" #contains decimal or nothing
+		if [[ $bt6v == v ]]
+		then
+		echo -n "Temperature=$bt6t.$bt6d " >> $1.com
+		else
+		echo -n "Temperature=$bt6t " >> $1.com
+		fi
+	else
+	echo $1
+	echo What is the temperature?
+	read temp
+	echo -n "Temperature=$temp " >> $1.com
+	fi
+t5=0
+t6=0
+fi
+
+echo "" >> $1.com
+echo "" >> $1.com
+echo $1 >> $1.com
+echo "" >> $1.com
+
+if grep -q "_sp01_" $1.com #checks file name for _sp##_ which indicates spin state (charge, multiplicity)
+then
+        echo "0 1" >> $1.com
+elif [[ $SpiN == 1 ]]
+then
+	echo "0 1" >> $1.com
+elif grep -q "_sp03_" $1.com
+then
+        echo "0 3" >> $1.com
+elif grep -q "_sp05_" $1.com
+then
+        echo "0 5" >> $1.com
+else
+        echo "DO_NOT_SUBMIT" >> $1.com
+
+fi
+}
+
+##########################################################################
+calcStdCoordinates () {
+#commandline values must be in order of lowest to greatest for this to work
+
+echo "" > t$1.gjf
+offset=0
+k=0
+l=0
+while [ $k -lt $2 ] #$1=JOBNAME $2=#commandline arguments $3=gjf vs com correction
+do
+#the following assign proper coordinates to each compared atom
+# need to add 2 to bond[k] value to compensate for use of .com origin in SQRIPTS
+AtomNum1=`echo ${bond[$k]} + $3 + $offset | bc`
+echo "AtomNum1=$AtomNum1"
+x1=$(awk -v line="$AtomNum1" 'NR==line{print $field}' $1.struct)
+echo "$x1" >> t$1.gjf
+echo "$AtomNum1 $x1"
+sed -i $AtomNum1"d" $1.struct
+(( k++ ))
+(( offset-- ))
+done
+cat $1.struct >> t$1.gjf
+k=0
+
+}
+
+##########################################################################
+calcBondLength () { #calcs bond length btwn given atoms from commandline
+
+k=0
+l=0
+while [ $k -lt $2 ] #$1=JOBNAME $2=#commandline arguments $3=gjf vs com correction
+do
+#the following assign proper coordinates to each compared atom
+# need to add 2 to bond[k] value to compensate for use of .com origin in SQRIPTS
+AtomNum1=`echo ${bond[$k]} + $3 | bc`
+x1=$(awk -v line="$AtomNum1" -v field="2" 'NR==line{print $field}' $1.struct)
+y1=$(awk -v line="$AtomNum1" -v field="3" 'NR==line{print $field}' $1.struct)
+z1=$(awk -v line="$AtomNum1" -v field="4" 'NR==line{print $field}' $1.struct)
+(( k++ ))
+
+AtomNum1=`echo ${bond[$k]} + $3 | bc`
+
+x2=$(awk -v line="$AtomNum1" -v field="2" 'NR==line{print $field}' $1.struct)
+y2=$(awk -v line="$AtomNum1" -v field="3" 'NR==line{print $field}' $1.struct)
+z2=$(awk -v line="$AtomNum1" -v field="4" 'NR==line{print $field}' $1.struct)
+	l=$(( $k - 1 ))
+
+#scale = decimal places; bc = bash calculator
+	x1=$(echo "scale=2; $x1 - $x2" | bc) #Scale 2 doesn't work well
+	y1=$(echo "scale=2; $y1 - $y2" | bc) #because of the long decimals
+	z1=$(echo "scale=2; $z1 - $z2" | bc) #contained in the coordinates
+	x1=$(echo "scale=2; $x1 * $x1" | bc) #It instead keeps all decimals
+	y1=$(echo "scale=2; $y1 * $y1" | bc)
+	z1=$(echo "scale=2; $z1 * $z1"  |bc)
+	SUM=$(echo "scale=2; $x1 + $y1 + $z1" | bc)
+	ANSWER=$(bc <<< "scale=2; sqrt(($SUM))")
+BONDLENGTH=${ANSWER:0:8} #cuts after 4 decimals (n-2=#decimals)
+	echo "B ${bond[$k]} ${bond[$l]} $BONDLENGTH F" >> $1.com
+modBond[k]=$BONDLENGTH
+#echo k equals $k 'with modBond[k]=' $BONDLENGTH
+(( k++ ))
+done
+mBk=$k
+echo "" >> $1.com
+k=0
+}
+
+##########################################################################
+modRedBonds () { #$1=$JOBNAME
+
+mBi=0
+mBincrement=0
+mB05=0.2
+mBcap=1
+mBcount=1
+while [ $mBi -lt $mBk ]
+do
+while [ $mBincrement -lt $mBcap ]
+do
+cp $1.com $1$mBcount'Mr'
+mBincrement=$(echo "scale=2; $mBincrement + $mB05" | bc)
+replaceMbond=$(echo "scale=2; $mBincrement + $modBond[$mBi]" | bc)
+sed "s/$1/$1$mBcount'Mr'/" $1.com > $1$mBcount'Mr'.com #create and replace
+sed "s/$1/$1$mBcount'Mr'/" $1.sh > $1$mBcount'Mr'.sh #create and replace
+sed -i "$1$mBcount'Mr'.com" -e "s/$modBond[$mBi]/$replaceMbond/"
+cat $1$mBcount'Mr'.com
+echo original bond length $modBond[$mBi] current bond length $replaceMbond
+echo do you wish to continue?
+read pause
+sbatch $1$mBcount'Mr'.sh
+done
+mBincrement=0
+done
+}
+
+
+##########################################################################
+makeFooter () { #Sets proper structure of footer
+		#$1=$JOBNAME $2=$BASE1
+
+
+NMAQ=0 #I use these as iterators to ensure only the right elements are
+MAQ=0  #accounted for. I tried to unset the found atoms but it's not
+       #working quite right.
+case $2 in
+        De*)
+        if grep -q "def2tzvppd" $1.com
+        then
+        def2TZVPPD $1
+        else
+        while [[ ${NMATOMS[$NMAQ]} != 'Q' ]]
+        do
+        echo -n "${NMATOMS[$NMAQ]} " >> $1.com
+        (( NMAQ++ ))
+        done
+        NMAQ=0
+        if [[ $nometal == 0 ]]
+        then
+        while [[ ${MATOMS[$MAQ]} != 'Q' ]]
+        do
+        echo -n "${MATOMS[$MAQ]} " >> $1.com
+        (( MAQ++ ))
+        done
+	echo "0" >> $1.com
+        MAQ=0
+        else
+        echo "0" >> $1.com
+        fi
+        echo "Def2TZVP" >> $1.com
+        echo "****" >> $1.com
+        echo "" >> $1.com
+        fi
+        ;;
+        RDe*)
+        if grep -q "def2tzvppd" $1.com
+        then
+        def2TZVPPD $1
+        else
+        while [[ ${NMATOMS[$NMAQ]} != 'Q' ]]
+        do
+        echo -n "${NMATOMS[$NMAQ]} " >> $1.com
+        (( NMAQ++ ))
+        done
+        NMAQ=0
+        if [[ $nometal == 0 ]]
+        then
+        while [[ ${MATOMS[$MAQ]} != 'Q' ]]
+        do
+        echo -n "${MATOMS[$MAQ]} " >> $1.com
+        (( MAQ++ ))
+        done
+	echo "0" >> $1.com
+        MAQ=0
+        else
+        echo "0" >> $1.com
+        fi
+        echo "Def2TZVP" >> $1.com
+        echo "****" >> $1.com
+        echo "" >> $1.com
+        fi
+        ;;
+        *)
+	 while [[ ${NMATOMS[$NMAQ]} != 'Q' ]]
+        do
+        echo -n "${NMATOMS[$NMAQ]} " >> $1.com
+        (( NMAQ++ ))
+        done
+	echo "0" >> $1.com
+        NMAQ=0
+        echo "$R4PLACE_ME" >> $1.com
+        echo "****" >> $1.com
+
+        if grep -q "pseudo=read" $1.com
+        then
+                while [[ ${MATOMS[$MAQ]} != 'Q' ]]
+                do
+                echo -n "${MATOMS[$MAQ]} " >> $1.com
+                (( MAQ++ ))
+                done
+		echo "0" >> $1.com
+                MAQ=0
+                echo "$R5PLACE_ME" >> $1.com
+                echo "****" >> $1.com
+                echo "" >> $1.com
+                while [[ ${MATOMS[$MAQ]} != 'Q' ]]
+                do
+                echo -n "${MATOMS[$MAQ]} " >> $1.com
+                (( MAQ++ ))
+                done
+		echo "0" >> $1.com
+                MAQ=0
+                echo "$R5PLACE_ME" >> $1.com
+        elif grep -q " Cr " $1.com #elif grep -q "m06l" $1.com
+        then
+                while [[ ${MATOMS[$MAQ]} != 'Q' ]]
+                do
+                echo -n "${MATOMS[$MAQ]} " >> $1.com
+                (( MAQ++ ))
+                done
+		echo "0" >> $1.com
+                MAQ=0
+                echo "$R5PLACE_ME" >> $1.com
+                echo "****" >> $1.com
+        fi
+        echo "" >> $1.com
+        ;;
+esac
+
+
+if [[ $EPS != 0 ]]
+then
+        echo "eps=$EPS" >> $1.com
+        echo "rsolv=$RSOLV" >> $1.com
+        echo "" >> $1.com
+fi
+
+}
+
+##########################################################################
+orgAtoms () { #adds appropriate nonmetal atoms
+
+if grep -q " $1 " $2.struct
+	then
+	NMATOMS[$NMA]=$1
+	(( NMA++ ))
+fi
+}
+
+##########################################################################
+inorgAtoms () { #adds appropriate metal atoms
+if grep -q " $1 " $2.struct
+	then
+	MATOMS[$MA]=$1
+	(( MA++ ))
+fi
+}
+
+movToFailed () { #$1 = $JOBNAME : moves all com log chk and sh files
+mv $1.com failedJobs
+mv $1.log failedJobs
+mv $1.chk failedJobs
+mv $1.sh failedJobs
+}
+
+removFiles () { #$1 = $JOBNAME : removes all com log chk and sh files
+rm $1.com
+rm $1.log
+rm $1.chk
+rm $1.sh
+}
+
+fIRC () {
+
+##########################################################################
+#This preps IRC. You must feed it the log file you want to work with
+j=0
+while [[ "$menuOption" == 4 ]]
+do
+echo "What is the name of the file that you wish to perform the IRC?"
+read IRCname
+JOBNAME=$(echo $IRCname | cut -f 1 -d 'Q')"Ir"
+~/Scripts/xyz $IRCname > $JOBNAME.struct
+cat $JOBNAME.struct
+echo continue?
+read pause
+BASE1="Ir"
+determineProcedure $BASE1 #determines Procedure
+makeHeader $JOBNAME $BASE1 $BASE1 #creates header of .com file
+sed -i 's/^/ /' $JOBNAME.struct
+tail -n +3 $JOBNAME.struct >> $JOBNAME.com
+echo "" >> $JOBNAME.com
+
+
+	while [ $j -lt 40 ] #deterine types of atoms in structure
+	do
+	if [ $j -lt 11 ] #fewer nonMetals than metals
+	then
+	orgAtoms ${oAtoms[$j]} $JOBNAME #nonmetal atoms into footer
+	fi
+	inorgAtoms ${iAtoms[$j]} $JOBNAME #metal atoms into footer
+	(( j++ ))
+	done
+	NMATOMS[$NMA]='Q'
+	MATOMS[$MA]='Q'
+	MA=0
+	NMA=0
+	j=0
+
+	#	M=$(($i % 6))
+	#	let "mC = $M + 1"
+	#	if [[ "$mC" == 4 ]]
+	#	then
+	#	let "mC = $M + 2"
+	#	fi
+	#	COLOR='\033[0;3'$mC'm'
+
+	makeFooter $JOBNAME $BASE1
+
+	sed "s/REPLACE_ME/$JOBNAME/" ~/Scripts/sh72Temp.sh > $JOBNAME.sh #create sh
+	sed "s/$JOBNAME/$JOBNAME"B"/" $JOBNAME.sh > $JOBNAME"B".sh #create sh
+	sed "s/$JOBNAME/$JOBNAME"B"/" $JOBNAME.com > $JOBNAME"B".com #create
+	sed -i "$JOBNAME"B".com" -e "s/forward/reverse/"
+
+	cat $JOBNAME.com
+	cat $JOBNAME"B".com
+	if grep -q "DO_NOT_SUBMIT" $JOBNAME.com
+       	then
+        echo "DO_NOT_SUBMIT detected in $JOBNAME.com"
+        else
+	echo -e "${RED}$JOBNAME and $JOBNAME"B" READY${NC}, continue?"
+	#echo -e "$JOBNAME and $JOBNAME"B" READY, continue?"
+	read continue
+         sbatch $JOBNAME.sh #submit sh
+	 sbatch $JOBNAME"B".sh
+         rm $JOBNAME.struct
+        fi
+
+done
+
+}
+
+fGJF () {
+
+##########################################################################
+#This guesses bondlengths for modred   $1=#frozen bonds
+
+i=0
+j=0
+SCRIPTS=(*.gjf) #contains array of .gjf files
+
+echo 'Do you wish to perform a dynamic modred?(y/n)'
+read dynamicMODRED
+
+if [[ $FROZENBONDS == 0 ]]
+then
+while [ $i -lt ${#SCRIPTS[@]} ] #increment up to number of SCRIPTS
+do
+	JOBNAME=$(echo ${SCRIPTS[i]} | cut -f 1 -d '.')
+	# cuts all after '.'
+if grep -q "DO_NOT_SUBMIT" $JOBNAME.gjf
+then
+echo No gjf files found.
+else
+	let "B1 = $(echo ${#JOBNAME})-2"
+	BASE1="${JOBNAME:$B1:2}" #procedure obtained from end
+grep '^ [A-Z]' ${SCRIPTS[i]} | dos2unix > "$JOBNAME.struct"
+	#gets the cartesian coordinates
+
+determineProcedure $BASE1 #determines Procedure
+
+makeHeader $JOBNAME $BASE1 $BASE1 #creates header of .com file
+
+
+cat $JOBNAME.struct >> $JOBNAME.com #puts coordinates into .com file
+echo "" >> $JOBNAME.com
+
+
+if grep -q "opt=modred" $JOBNAME.com #used to add bond freezes
+then
+calcBondLength $JOBNAME $1 0
+#else
+#echo "Should $JOBNAME.com be modred?"
+fi
+
+while [ $j -lt 40 ] #deterine types of atoms in structure
+do
+if [ $j -lt 11 ] #fewer nonMetals than metals
+then
+orgAtoms ${oAtoms[$j]} $JOBNAME #inserts proper nonmetal atoms into footer
+fi
+inorgAtoms ${iAtoms[$j]} $JOBNAME #inserts proper metal atoms into footer
+(( j++ ))
+done
+	NMATOMS[$NMA]='Q'
+	MATOMS[$MA]='Q'
+MA=0
+NMA=0
+j=0
+		M=$(($i % 6))
+		let "mC = $M + 1"
+		if [[ "$mC" == 4 ]]
+		then
+		let "mC = $M + 2"
+		fi
+		COLOR='\033[0;3'$mC'm'
+
+makeFooter $JOBNAME $BASE1
+
+sed "s/REPLACE_ME/$JOBNAME/" ~/Scripts/sh24Temp.sh > $JOBNAME.sh #create sh
+	if [[ "$TRUEFAL2E" != "n" ]]
+	then
+	cat $JOBNAME.com	#was JOBNAME1, I believe this is more cohesive
+	echo "do you want to see additional .com files before submission(y/n)?"
+	read TRUEFAL2E
+	fi
+
+if grep -q "DO_NOT_SUBMIT" $JOBNAME.com
+then
+echo "DO_NOT_SUBMIT detected in $JOBNAME.com"
+else
+ echo -e "${COLOR}$JOBNAME READY${NC}"
+ sbatch $JOBNAME.sh #submit sh
+ 	if [[ $BASE1 == Mr ]] && [[ $dynamicMODRED == y ]]
+ 	then
+	modRedBonds $JOBNAME
+	fi
+ rm $JOBNAME.struct
+ rm $JOBNAME.gjf
+fi
+fi
+	(( i++ ))
+
+done
+else
+echo Remember to put frozen bonds on the command line in sets of 2.
+fi
+
+}
+
+fLOG () {
+
+##########################################################################
+#This preps ready log files. It uses logic to decide what is ready in the
+#directory
+
+i=0
+j=0
+SQRIPTS=(*.log) #contains array of .log files
+xxx=0
+yyy=0
+if [[ "$FROZENBONDS" == "0" ]]
+then
+handleStationary=0
+echo "Do you wish to process stationary point log files?(y/n)"
+read handleStationary
+
+echo "Do you wish to process jobs that have failed more than 3 times?(y/n)"
+read threeStrikes
+
+TRUEFAL2E=0
+while [ $i -lt ${#SQRIPTS[@]} ] #increment up to number of SCRIPTS
+do
+MA=0
+NMA=0
+
+        JOBNAME=$(echo ${SQRIPTS[i]} | cut -f 1 -d '.')
+        # cuts all after '.'
+        let "B1 = $(echo ${#JOBNAME})-2"
+        let "BR = $(echo ${#JOBNAME})-5"
+	BASE1="${JOBNAME:$B1:2}" #procedure obtained from end
+	BASEr="${JOBNAME:$BR:3}" #determines if there have been 3 strikes (i.e. RRRMr)
+	nextProcedure $BASE1 $JOBNAME
+if [[ "$BASEr" == "RRR" ]] && [[ $threeStrikes != 'y' ]]
+then
+TRUEFALSE='F'
+echo "OOOOOO File $JOBNAME.log has reached third strike"
+elif [[ "$BASEr" == 'RRR' ]] && [[ $threeStrikes == 'y' ]]
+then
+echo "Process $JOBNAME.log?(T/F)"
+read TRUEFALSE
+fi
+case $TRUEFALSE in
+	T*)
+	case $SUFFIX in	#this is to shorten names compared to previous nomenclature
+		RFr*)
+	 	JOBNAME1=$(echo ${SQRIPTS[i]} | cut -f 1 -d 'F')$SUFFIX
+		;;
+		ROp*)
+		echo "O paradox detected" #Should consider renaming jobs so that they don't contain O
+		#JOBNAME1=$(echo ${SQRIPTS[i]} | cut -f 1 -d 'O')$SUFFIX
+		;;
+		RMr*)
+		JOBNAME1=$(echo ${SQRIPTS[i]} | cut -f 1 -d 'M')$SUFFIX
+		;;
+		RTs*)
+		JOBNAME1=$(echo ${SQRIPTS[i]} | cut -f 1 -d 'T')$SUFFIX
+		;;
+		RDe*)
+		JOBNAME1=$(echo ${SQRIPTS[i]} | cut -f 1 -d 'D')$SUFFIX
+		;;
+		*)
+		JOBNAME1=$(echo ${SQRIPTS[i]} | cut -f 1 -d '.')$SUFFIX
+		;;
+	esac
+
+	#JOBNAME1=$(echo ${SQRIPTS[i]} | cut -f 1 -d '.')$SUFFIX
+        if grep -q "QPErr" $JOBNAME.log
+	then
+		TRUEFALSE=F
+		echo OPErr
+	elif ! grep -q "QPErr" $JOBNAME.log
+	then
+	~/Scripts/xyz $JOBNAME.log > $JOBNAME1.struct
+	TRUEFALSE=T
+	fi
+;;
+esac
+case $TRUEFALSE in
+	T*)
+        sed -i 's/^/ /' $JOBNAME1.struct
+	makeHeader $JOBNAME1 $BASE1 $SUFFIX #creates header of .com file
+	tail -n +3 $JOBNAME1.struct >> $JOBNAME1.com
+	echo "" >> $JOBNAME1.com
+		if grep -q "opt=modred" $JOBNAME1.com #used to add bond freezes
+		then
+		calcBondLength $JOBNAME1 $1 2
+		fi
+	while [ $j -lt 40 ] #deterine types of atoms in structure
+	do
+		if [ $j -lt 11 ] #fewer nonMetals than metals
+		then
+		orgAtoms ${oAtoms[$j]} $JOBNAME1 #nonmetal atoms into footer
+		fi
+	inorgAtoms ${iAtoms[$j]} $JOBNAME1 #metal atoms into footer
+	(( j++ ))
+	done
+
+	j=0
+	NMATOMS[$NMA]='Q'
+	MATOMS[$MA]='Q'
+	MA=0
+	NMA=0
+		M=$(($i % 6))
+		let "mC = $M + 1"
+		if [[ "$mC" == 4 ]]
+		then
+		let "mC = $M + 2"
+		fi
+		COLOR='\033[0;3'$mC'm'
+
+	makeFooter $JOBNAME1 $SUFFIX
+
+	sed "s/REPLACE_ME/$JOBNAME1/" ~/Scripts/sh24Temp.sh > $JOBNAME1.sh #create sh
+
+		if [[ "$TRUEFAL2E" != "n" ]]
+		then
+		echo
+		cat $JOBNAME1.com
+		echo "do you want to see additional .com files before submission(y/n)?"
+		read TRUEFAL2E
+		fi
+
+	if grep -q "DO_NOT_SUBMIT" $JOBNAME1.com
+       	then
+        echo "DO_NOT_SUBMIT detected in $JOBNAME1.com"
+        else
+	echo -e "${COLOR}$JOBNAME1 READY${NC}"
+         sbatch $JOBNAME1.sh #submit sh
+         rm $JOBNAME1.struct
+		case $SUFFIX in #sorts through failed files and stores them in the local failedJobs directory
+			RFr*)
+			movToFailed $JOBNAME
+			;;
+			ROp*)
+			movToFailed $JOBNAME
+			;;
+			RMr*)
+			movToFailed $JOBNAME
+			;;
+			RTs*)
+			movToFailed $JOBNAME
+			;;
+			#RFc*)
+			#movToFailed $JOBNAME
+			#;;
+			RDe*)
+			movToFailed $JOBNAME
+			;;
+			*)
+			cp $JOBNAME.com $JOBNAME"Q".com
+			cp $JOBNAME.log $JOBNAME"Q".log
+			cp $JOBNAME.chk $JOBNAME"Q".chk
+			cp $JOBNAME.sh $JOBNAME"Q".sh
+			removFiles $JOBNAME
+			;;
+		esac
+        	fi
+	;;
+	*)
+	if grep -q "Stationary point" $JOBNAME.log
+        then
+	(( xxx++ )) #keeps track of number of already processed log
+	#echo XXXXXX $JOBNAME.log already processed
+	else
+	(( yyy++ )) #keeps track of number of unfinished log
+	#echo XXXXXX Stationary point in $JOBNAME.log not yet found
+	fi
+	;;
+esac
+(( i++ ))
+
+TRUEFALSE=0
+done
+i=0
+j=0
+
+echo "Number of already processed log files:            $xxx"
+echo "Number of unfound stationary points in log files: $yyy"
+
+xxx=0
+yyy=0
+else
+echo Remember to put frozen bonds on the command line in sets of 2.
+fi
+
+
+}
+
+##########################################################################
+#This adjusts gjf files so that proper spin is accounted for
+fSPINSCRIPT () {
+
+i=0 #initiate at 0
+
+extension="gjf"
+spin="sp01"
+
+echo Do your file names contain 5 or 6 names?
+read names
+
+SCRIPTS=(*.$extension)
+
+while [ $i -lt ${#SCRIPTS[@]} ] #increment up to number of SCRIPTS
+do
+
+Cut1=$(echo ${SCRIPTS[i]} | cut -f 1 -d '_')
+Cut2=$(echo ${SCRIPTS[i]} | cut -f 2 -d '_')
+Cut3=$(echo ${SCRIPTS[i]} | cut -f 3 -d '_')
+Cut4=$(echo ${SCRIPTS[i]} | cut -f 4 -d '_')
+Cut5=$(echo ${SCRIPTS[i]} | cut -f 5 -d '_')
+Cut6=$(echo ${SCRIPTS[i]} | cut -f 6 -d '_')
+JOBNAME=$(echo ${SCRIPTS[i]} | cut -f 1 -d '.')
+
+if [[ $names == 5 ]]
+then
+echo "$Cut1 $Cut2 $Cut3 $Cut4 $Cut5"
+read pause
+        if  [[ $Cut3 == $spin ]] && [ ! -f $Cut1'_'$Cut2'_sp03_'$Cut4'_'$Cut5 ]
+        then
+        cp $JOBNAME.gjf $Cut1'_'$Cut2'_sp03_'$Cut4'_'$Cut5
+        cp $JOBNAME.gjf $Cut1'_'$Cut2'_sp05_'$Cut4'_'$Cut5
+        fi
+elif [[ $names == 6 ]]
+then
+echo "$Cut1 $Cut2 $Cut3 $Cut4 $Cut5 $Cut6"
+read pause
+        if  [[ $Cut3 == $spin ]] && [ ! -f $Cut1'_'$Cut2'_sp03_'$Cut4'_'$Cut5'_'$Cut6 ]
+        then
+        cp $JOBNAME.gjf $Cut1'_'$Cut2'_sp03_'$Cut4'_'$Cut5'_'$Cut6
+        cp $JOBNAME.gjf $Cut1'_'$Cut2'_sp05_'$Cut4'_'$Cut5'_'$Cut6
+        fi
+fi
+        (( i++ ))
+done
+}
+
+fSLURMSCRIPT () {
+
+i=0 #initiate at 0
+
+SCRIPTS=(*.out) #contains array of .out
+
+while [ $i -lt ${#SCRIPTS[@]} ] #increment up to number of SCRIPTS
+do
+    mv $(echo ${SCRIPTS[i]}) slurm
+(( i++ ))
+done
+}
+
+fTHERM () {
+
+echo What is the name of the log file being sent to Therm?
+read thermLOG
+~/Scripts/therm $thermLOG #sending it the frequency log file.
+
+}
+
+##########################################################################
+calcStdCoordinates () {
+#commandline values must be in order of lowest to greatest for this to work
+
+echo "" > t$1.gjf
+offset=0
+k=0
+l=0
+while [ $k -lt $2 ] #$1=JOBNAME $2=#commandline arguments $3=gjf vs com correction
+do
+#the following assign proper coordinates to each compared atom
+# need to add 2 to bond[k] value to compensate for use of .com origin in SQRIPTS
+AtomNum1=`echo ${bond[$k]} + $3 + $offset | bc`
+echo "AtomNum1=$AtomNum1"
+x1=$(awk -v line="$AtomNum1" 'NR==line{print $field}' $1.struct)
+echo "$x1" >> t$1.gjf
+echo "$AtomNum1 $x1"
+sed -i $AtomNum1"d" $1.struct
+(( k++ ))
+(( offset-- ))
+done
+cat $1.struct >> t$1.gjf
+k=0
+
+}
+
+
+#########################################################################
+stdCoordinates () {
+##########################################################################
+#This guesses bondlengths for modred   $1=#frozen bonds
+
+i=0
+j=0
+SCRIPTS=(*.gjf) #contains array of .gjf files
+
+while [ $i -lt ${#SCRIPTS[@]} ] #increment up to number of SCRIPTS
+do
+        JOBNAME=$(echo ${SCRIPTS[i]} | cut -f 1 -d '.')
+if grep -q "DO_NOT_SUBMIT" $JOBNAME.gjf
+then
+echo No gjf files found.
+else
+grep '^ [A-Z]' ${SCRIPTS[i]} | dos2unix > "$JOBNAME.struct"
+        #gets the cartesian coordinates
+calcStdCoordinates $JOBNAME $1 0
+fi
+done
+
+}
+
+
+##########################################################################
+# START OF PROGRAM                                                       #
+##########################################################################
+echo "#=$#"
+while [[ $menuOption != 'Q' ]]
+do
+FROZENBONDS=0
+menu
+case $menuOption in
+	1*)
+	fSPINSCRIPT
+        ;;
+	2*)
+	if [ $# -lt 2 ]
+	then
+	echo 'Frozen Bonds?(YES=1/NO=0)'
+	read FROZENBONDS
+	fi
+	fGJF $#
+	;;
+	3*)
+	if [ $# -lt 2 ]
+	then
+	echo 'Frozen Bonds?(YES=1/NO=0)'
+	read FROZENBONDS
+	fi
+	fLOG $#
+	;;
+	4*)
+	fIRC
+	;;
+	5*)
+	calcStdCoordinates $#
+	;;
+	L*)
+	ls
+	;;
+	T*)
+	fTHERM
+	;;
+	S*)
+	fSLURMSCRIPT
+	;;
+	Q*)
+	echo Thank you for using alphaScript
+	;;
+esac
+done
